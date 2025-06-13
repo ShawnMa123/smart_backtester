@@ -16,18 +16,30 @@
         }
         .card {
             border: none;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            border-radius: 0.75rem;
+            box-shadow: 0 4px M2px rgba(0,0,0,0.08);
+            transition: all 0.3s ease-in-out;
+        }
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px M6px rgba(0,0,0,0.12);
         }
         .metric-value {
-            font-size: 2rem;
+            font-size: 2.25rem;
             font-weight: 600;
         }
         .metric-label {
             color: #6c757d;
             font-size: 0.9rem;
+            text-transform: uppercase;
         }
         .form-label {
             font-weight: 500;
+        }
+        /* 确保图表容器有明确的高度，并且可以自适应 */
+        .chart-container {
+            width: 100%;
+            height: 500px;
         }
     </style>
 </head>
@@ -47,7 +59,7 @@
                 <div class="row g-3 mb-4">
                     <div class="col-md-3">
                         <label for="tickerInput" class="form-label">ETF/股票代码</label>
-                        <input type="text" id="tickerInput" class="form-control" placeholder="例如: QQQ, 510300.SS">
+                        <input type="text" id="tickerInput" class="form-control" placeholder="例如: 510300, 600519, QQQ">
                     </div>
                     <div class="col-md-3">
                         <label for="periodSelect" class="form-label">回测周期</label>
@@ -61,10 +73,10 @@
                     <div class="col-md-3">
                         <label for="benchmarkSelect" class="form-label">对比大盘指数</label>
                         <select id="benchmarkSelect" class="form-select">
-                            <option value="" selected>-- 无 --</option>
+                            <option value="">-- 无 --</option>
+                            <option value="000300" selected>沪深300</option>
                             <option value="^GSPC">标普500 (S&P 500)</option>
                             <option value="^NDX">纳斯达克100 (Nasdaq 100)</option>
-                            <option value="000300.SS">沪深300</option>
                             <option value="^HSI">恒生指数</option>
                         </select>
                     </div>
@@ -89,10 +101,7 @@
                             <option value="dma_cross">双均线策略</option>
                         </select>
                     </div>
-                    <!-- 策略参数容器 -->
-                    <div id="strategyParams" class="col-md-9 row g-3 align-items-end">
-                        <!-- JS会在这里动态插入参数输入框 -->
-                    </div>
+                    <div id="strategyParams" class="col-md-9 row g-3 align-items-end"></div>
                 </div>
 
                 <!-- 第三行: 交易成本 -->
@@ -105,13 +114,9 @@
                             <option value="fixed">固定金额</option>
                         </select>
                     </div>
-                     <!-- 佣金参数容器 -->
-                    <div id="commissionParams" class="col-md-9 row g-3 align-items-end">
-                        <!-- JS会在这里动态插入佣金参数输入框 -->
-                    </div>
+                    <div id="commissionParams" class="col-md-9 row g-3 align-items-end"></div>
                 </div>
 
-                <!-- 提交按钮 -->
                 <div class="d-grid mt-4">
                     <button id="runButton" class="btn btn-primary btn-lg">开始回测</button>
                 </div>
@@ -120,9 +125,7 @@
 
         <!-- 加载与错误提示 -->
         <div id="loading" class="text-center my-5" style="display: none;">
-            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                <span class="visually-hidden">Loading...</span>
-            </div>
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"><span class="visually-hidden">Loading...</span></div>
             <p class="mt-2 text-muted">正在进行深度计算，请稍候...</p>
         </div>
         <div class="alert alert-danger" id="error-alert" style="display: none;" role="alert">
@@ -132,27 +135,20 @@
         <!-- 结果展示区域 -->
         <div id="results" style="display: none;">
             <h2 class="text-center mb-4">回测结果分析</h2>
-
-            <!-- 关键性能指标 -->
             <div class="card p-3 mb-5">
                 <div class="card-body">
                     <h5 class="card-title mb-4">关键性能指标 (KPIs)</h5>
-                    <div id="kpi-cards" class="row">
-                        <!-- JS会在这里动态插入KPI卡片 -->
-                    </div>
+                    <div id="kpi-cards" class="row"></div>
                 </div>
             </div>
-
-            <!-- 图表 -->
             <div class="card p-3 mb-5">
                  <div class="card-body">
-                    <div id="portfolio-chart" style="width: 100%; height: 500px;"></div>
+                    <div id="portfolio-chart" class="chart-container"></div>
                  </div>
             </div>
-
             <div class="card p-3">
                  <div class="card-body">
-                    <div id="periodic-returns-chart" style="width: 100%; height: 400px;"></div>
+                    <div id="periodic-returns-chart" class="chart-container" style="height: 400px;"></div>
                  </div>
             </div>
         </div>
@@ -162,7 +158,6 @@
         </footer>
     </div>
 
-    <!-- 引入ECharts和我们自己的JS -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="script.js"></script>
 </body>
