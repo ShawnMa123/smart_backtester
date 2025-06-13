@@ -22,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const periodicReturnsChart = echarts.init(periodicReturnsChartDiv);
 
     // --- ECharts 响应式处理 ---
-    // 监听窗口大小变化事件，自动调整图表尺寸
     window.addEventListener('resize', () => {
         portfolioChart.resize();
         periodicReturnsChart.resize();
@@ -35,8 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
             config: {
                 ticker: '510300',
                 benchmark: '000300',
-                strategy: {name: 'fixed_frequency', params: {frequency: 'M', amount: 1000}},
-                commission: {type: 'percentage', rate: 3, min_fee: 5} // rate是万分之几
+                strategy: { name: 'fixed_frequency', params: { frequency: 'M', amount: 1000 } },
+                commission: { type: 'percentage', rate: 3, min_fee: 5 } // rate是万分之几
             }
         },
         'tech-power': {
@@ -44,8 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
             config: {
                 ticker: 'QQQ',
                 benchmark: '^NDX',
-                strategy: {name: 'dma_cross', params: {fast: 20, slow: 50}},
-                commission: {type: 'percentage', rate: 3, min_fee: 1}
+                strategy: { name: 'dma_cross', params: { fast: 20, slow: 50 } },
+                commission: { type: 'percentage', rate: 3, min_fee: 1 }
             }
         },
         'sp500-buy-hold': {
@@ -53,8 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
             config: {
                 ticker: 'SPY',
                 benchmark: '^GSPC',
-                strategy: {name: 'buy_and_hold', params: {}},
-                commission: {type: 'none'}
+                strategy: { name: 'buy_and_hold', params: {} },
+                commission: { type: 'none' }
             }
         }
     };
@@ -87,17 +86,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedPresetKey = presetSelect.value;
         if (!selectedPresetKey) return;
         const preset = presets[selectedPresetKey].config;
-
         tickerInput.value = preset.ticker;
         benchmarkSelect.value = preset.benchmark;
         strategySelect.value = preset.strategy.name;
-
         renderStrategyParams();
         for (const paramKey in preset.strategy.params) {
             const input = document.getElementById(`param-${paramKey}`);
             if (input) input.value = preset.strategy.params[paramKey];
         }
-
         commissionTypeSelect.value = preset.commission.type;
         renderCommissionParams();
         for (const paramKey in preset.commission) {
@@ -105,8 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const input = document.getElementById(`param-${paramKey}`);
             if (input) input.value = preset.commission[paramKey];
         }
-
-        presetSelect.value = ""; // 重置选择，避免混淆
+        presetSelect.value = "";
     }
 
     async function runBacktest() {
@@ -115,12 +110,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         setLoading(true);
-        const config = buildConfigFromUI();
+        const config = buildConfigFromUI(); // 从UI获取配置
 
         try {
             const response = await fetch('http://127.0.0.1:5001/api/backtest', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(config)
             });
             if (!response.ok) {
@@ -128,7 +123,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errorData.error || `服务器错误: ${response.status}`);
             }
             const results = await response.json();
+
+            // 将config传递给渲染函数，以便动态生成图例
             renderResults(results, config);
+
         } catch (error) {
             showError(`回测失败: ${error.message}`);
         } finally {
@@ -140,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const period = periodSelect.value;
         const endDate = new Date();
         const startDate = new Date();
-        const daysMap = {'3m': 90, '6m': 180, '1y': 365, '5y': 365 * 5};
+        const daysMap = { '3m': 90, '6m': 180, '1y': 365, '5y': 365 * 5 };
         startDate.setDate(endDate.getDate() - (daysMap[period] || 365));
         const formatDate = (date) => date.toISOString().split('T')[0];
 
@@ -152,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const commissionType = commissionTypeSelect.value;
-        const commissionParams = {type: commissionType};
+        const commissionParams = { type: commissionType };
         commissionParamsContainer.querySelectorAll('input').forEach(input => {
             const key = input.id.replace('param-', '');
             if (key === 'rate') {
@@ -167,7 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
             startDate: formatDate(startDate),
             endDate: formatDate(endDate),
             initialCapital: 100000,
-            strategy: {name: strategyName, params: strategyParams},
+            strategy: { name: strategyName, params: strategyParams },
             commission: commissionParams,
             benchmarkTicker: benchmarkSelect.value || null
         };
@@ -175,10 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderResults(results, config) {
         renderKPIs(results.metrics, results.chart_data);
-
-        // *** 修改点 3: 将config传递给绘图函数 ***
-        renderPortfolioChart(results.chart_data, config);
-
+        renderPortfolioChart(results.chart_data, config); // 传入config
         renderPeriodicReturnsChart(results.chart_data);
         resultsDiv.style.display = 'block';
     }
@@ -197,54 +192,60 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    function renderPortfolioChart(chartData) {
+    function renderPortfolioChart(chartData, config) {
+        const strategyTicker = config.ticker.toUpperCase();
+        const benchmarkTicker = config.benchmarkTicker;
+
+        // 动态构建图例名称
+        const strategyName = `策略 (${strategyTicker})`;
+        const assetBenchmarkName = `标的基准 (${strategyTicker})`;
+
         const series = [
-            {name: '策略', type: 'line', data: chartData.portfolio_curve.values, showSymbol: false, smooth: true},
-            {
-                name: '标的基准',
-                type: 'line',
-                data: chartData.benchmark_curve.values,
-                showSymbol: false,
-                smooth: true,
-                lineStyle: {type: 'dashed'}
-            }
+            { name: strategyName, type: 'line', data: chartData.portfolio_curve.values, showSymbol: false, smooth: true },
+            { name: assetBenchmarkName, type: 'line', data: chartData.benchmark_curve.values, showSymbol: false, smooth: true, lineStyle: { type: 'dashed' } }
         ];
+
         if (chartData.extra_benchmark_curve) {
-            series.push({
-                name: chartData.extra_benchmark_curve.name || '大盘基准',
-                type: 'line',
-                data: chartData.extra_benchmark_curve.values,
-                showSymbol: false,
-                smooth: true,
-                lineStyle: {type: 'dotted'}
-            });
+             const marketBenchmarkName = `大盘基准 (${(benchmarkTicker || 'N/A').toUpperCase()})`;
+             series.push({
+                 name: marketBenchmarkName,
+                 type: 'line',
+                 data: chartData.extra_benchmark_curve.values,
+                 showSymbol: false,
+                 smooth: true,
+                 lineStyle: { type: 'dotted' }
+             });
         }
+
         const option = {
-            title: {text: '资金曲线', left: 'center'},
-            tooltip: {trigger: 'axis', axisPointer: {type: 'line'}},
-            legend: {data: series.map(s => s.name), top: 'bottom'},
-            grid: {left: '10%', right: '10%', bottom: '15%', containLabel: true},
-            xAxis: {type: 'category', data: chartData.portfolio_curve.dates},
-            yAxis: {type: 'value', scale: true, axisLabel: {formatter: '{value}'}},
-            dataZoom: [{type: 'inside'}, {type: 'slider'}],
+            title: { text: '资金曲线', left: 'center' },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+            legend: {
+                data: series.map(s => s.name),
+                top: 'bottom',
+                type: 'scroll'
+            },
+            grid: { left: '10%', right: '10%', bottom: '15%', containLabel: true },
+            xAxis: { type: 'category', data: chartData.portfolio_curve.dates },
+            yAxis: { type: 'value', scale: true, axisLabel: { formatter: '{value}' } },
+            dataZoom: [{ type: 'inside' }, { type: 'slider' }],
             series: series
         };
         portfolioChart.setOption(option, true);
     }
 
     function renderPeriodicReturnsChart(chartData) {
-        // 提供切换年度/月度视图的功能
         const returnsData = chartData.monthly_returns;
         const titleText = '月度收益率分布';
         const option = {
-            title: {text: titleText, left: 'center'},
-            tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
-            grid: {left: '3%', right: '4%', bottom: '3%', containLabel: true},
-            xAxis: {type: 'category', data: returnsData.dates},
-            yAxis: {type: 'value', axisLabel: {formatter: '{value} %'}},
+            title: { text: titleText, left: 'center' },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'category', data: returnsData.dates },
+            yAxis: { type: 'value', axisLabel: { formatter: '{value} %' } },
             series: [{
                 name: '收益率', type: 'bar', data: returnsData.values,
-                itemStyle: {color: (params) => params.value >= 0 ? '#5470c6' : '#ee6666'}
+                itemStyle: { color: (params) => params.value >= 0 ? '#5470c6' : '#ee6666' }
             }]
         };
         periodicReturnsChart.setOption(option, true);
