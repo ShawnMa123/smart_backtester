@@ -196,42 +196,111 @@ document.addEventListener('DOMContentLoaded', () => {
         const strategyTicker = config.ticker.toUpperCase();
         const benchmarkTicker = config.benchmarkTicker;
 
-        // 动态构建图例名称
         const strategyName = `策略 (${strategyTicker})`;
         const assetBenchmarkName = `标的基准 (${strategyTicker})`;
 
+        // --- 新增：准备交易标记点数据 ---
+        let markPointsData = [];
+        if (chartData.trade_markers) {
+            if (chartData.trade_markers.buy_points) {
+                chartData.trade_markers.buy_points.forEach(point => {
+                    markPointsData.push({
+                        name: '买入',
+                        value: 'B', // Displayed in tooltip if not customized by formatter
+                        xAxis: point.date,
+                        yAxis: point.value,
+                        symbol: 'triangle', // Upward triangle
+                        symbolSize: 10,
+                        symbolRotate: 0,
+                        itemStyle: { color: '#00cc66' } // Green for buy
+                    });
+                });
+            }
+            if (chartData.trade_markers.sell_points) {
+                chartData.trade_markers.sell_points.forEach(point => {
+                    markPointsData.push({
+                        name: '卖出',
+                        value: 'S', // Displayed in tooltip if not customized by formatter
+                        xAxis: point.date,
+                        yAxis: point.value,
+                        symbol: 'triangle', // Downward triangle
+                        symbolSize: 10,
+                        symbolRotate: 180,
+                        itemStyle: { color: '#ff4d4d' } // Red for sell
+                    });
+                });
+            }
+        }
+        // --- 结束：准备交易标记点数据 ---
+
         const series = [
-            { name: strategyName, type: 'line', data: chartData.portfolio_curve.values, showSymbol: false, smooth: true },
-            { name: assetBenchmarkName, type: 'line', data: chartData.benchmark_curve.values, showSymbol: false, smooth: true, lineStyle: { type: 'dashed' } }
+            {
+                name: strategyName,
+                type: 'line',
+                data: chartData.portfolio_curve.values,
+                showSymbol: false,
+                smooth: true,
+                // --- 新增：将标记点附加到策略曲线上 ---
+                markPoint: {
+                    data: markPointsData,
+                    symbolSize: 10, // Default size if not specified in individual points
+                    label: {
+                        show: true,
+                        formatter: '{b}', // Display 'B' or 'S' from 'value' property
+                        fontSize: 9,
+                        offset: [0, -12] // Offset label slightly above the point
+                    },
+                    tooltip: { // Customize tooltip for mark points
+                        formatter: function (params) {
+                            // params.data will be one of the objects from markPointsData
+                            return `${params.name}<br/>日期: ${params.data.xAxis}<br/>净值: ${params.data.yAxis.toFixed(2)}`;
+                        }
+                    }
+                }
+                // --- 结束：将标记点附加到策略曲线上 ---
+            },
+            {
+                name: assetBenchmarkName,
+                type: 'line',
+                data: chartData.benchmark_curve.values,
+                showSymbol: false,
+                smooth: true,
+                lineStyle: { type: 'dashed' }
+            }
         ];
 
         if (chartData.extra_benchmark_curve) {
-             const marketBenchmarkName = `大盘基准 (${(benchmarkTicker || 'N/A').toUpperCase()})`;
-             series.push({
-                 name: marketBenchmarkName,
-                 type: 'line',
-                 data: chartData.extra_benchmark_curve.values,
-                 showSymbol: false,
-                 smooth: true,
-                 lineStyle: { type: 'dotted' }
-             });
+            const marketBenchmarkName = `大盘基准 (${(benchmarkTicker || 'N/A').toUpperCase()})`;
+            series.push({
+                name: marketBenchmarkName,
+                type: 'line',
+                data: chartData.extra_benchmark_curve.values,
+                showSymbol: false,
+                smooth: true,
+                lineStyle: { type: 'dotted' }
+            });
         }
 
         const option = {
             title: { text: '资金曲线', left: 'center' },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+            tooltip: { // Global tooltip configuration
+                trigger: 'axis',
+                axisPointer: { type: 'cross' }, // Use 'cross' for better point snapping
+                // Tooltip for lines will be handled by default
+                // Tooltip for markPoints is customized within markPoint config
+            },
             legend: {
                 data: series.map(s => s.name),
                 top: 'bottom',
                 type: 'scroll'
             },
             grid: { left: '10%', right: '10%', bottom: '15%', containLabel: true },
-            xAxis: { type: 'category', data: chartData.portfolio_curve.dates },
+            xAxis: { type: 'category', data: chartData.portfolio_curve.dates, axisPointer: {snap: true} },
             yAxis: { type: 'value', scale: true, axisLabel: { formatter: '{value}' } },
             dataZoom: [{ type: 'inside' }, { type: 'slider' }],
             series: series
         };
-        portfolioChart.setOption(option, true);
+        portfolioChart.setOption(option, true); // true to clear previous options
     }
 
     function renderPeriodicReturnsChart(chartData) {
