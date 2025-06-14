@@ -1,149 +1,183 @@
 # backend/backtest_engine.py
-from utils import get_price_data_and_name  # Use the new function
+from utils import get_price_data_and_name
 from strategies import generate_signals
 from analysis import analyze_performance
 import pandas as pd
+import numpy as np  # Ensure numpy is imported
 
 
 def run_backtest(config):
     ticker = config['ticker']
     start_date = config['startDate']
     end_date = config['endDate']
-    # ---- MODIFIED: Initial Capital ----
-    initial_capital = float(config.get('initialCapital', 100000))  # Default 100k if not provided
-    # ---- END MODIFIED ----
+    initial_capital_ref = float(config.get('initialCapital', 0))
     strategy_name = config['strategy']['name']
     strategy_params = config['strategy'].get('params', {})
     commission_config = config.get('commission', {})
     benchmark_ticker = config.get('benchmarkTicker')
+    take_profit_pct = config.get('takeProfit', None)
+    stop_loss_pct = config.get('stopLoss', None)
 
-    # ---- NEW: Stop-Loss / Take-Profit params ----
-    take_profit_pct = config.get('takeProfit', None)  # e.g., 0.1 for 10%
-    stop_loss_pct = config.get('stopLoss', None)  # e.g., 0.05 for 5%
-    # ---- END NEW ----
-
-    # --- 2. 数据准备 ---
-    # ---- MODIFIED: Use new util function ----
     data, asset_name = get_price_data_and_name(ticker, start_date, end_date)
-    config['assetName'] = asset_name  # Store asset name in config to pass to analysis
+    config['assetName'] = asset_name
+
+    benchmark_data_df = None
     if benchmark_ticker:
         benchmark_data_df, benchmark_name = get_price_data_and_name(benchmark_ticker, start_date, end_date)
         config['benchmarkAssetName'] = benchmark_name
-    # ---- END MODIFIED ----
 
-    # --- 3. 生成交易信号 ---
-    data = generate_signals(data.copy(), strategy_name, strategy_params)  # Pass a copy
+    data = generate_signals(data.copy(), strategy_name, strategy_params)
 
-    # --- 4. 核心回测循环 ---
-    cash = initial_capital
+    cash = 0
     shares = 0
     portfolio_values = []
-    last_signal = 0  # From strategy
+    actual_invested_capital_history = [0]  # Track actual capital invested over time for PnL calcs
+    first_investment_amount_for_benchmark = 0  # For scaling benchmarks if initial_capital_ref is 0
 
-    # For SL/TP, track entry price for current position
+    last_signal = 0
     current_position_entry_price = None
-    positions = []  # To store trade details for advanced P&L (optional for now)
+
+    # Store cash and shares for analysis if needed later for PnL calculation
+    data['cash_flow'] = 0.0
+    data['shares_held'] = 0.0
 
     for i in range(len(data)):
         price = data['Close'].iloc[i]
-        original_signal = data['Signal'].iloc[i]  # Signal from strategy
+        original_signal = data['Signal'].iloc[i]
+        actual_signal_for_day = original_signal
 
-        # --- Apply SL/TP logic (overrides strategy signal if triggered) ---
-        actual_signal_for_day = original_signal  # Start with strategy signal
-
-        if shares > 0 and current_position_entry_price is not None:  # If holding a position
-            # Check Take Profit
+        # SL/TP Logic
+        if shares > 0 and current_position_entry_price is not None:
             if take_profit_pct is not None and price >= current_position_entry_price * (1 + take_profit_pct):
-                actual_signal_for_day = -1  # Force sell for Take Profit
-                print(f"{data.index[i].strftime('%Y-%m-%d')}: Take Profit triggered at {price:.2f}")
-            # Check Stop Loss (importantly, check *after* take profit)
+                actual_signal_for_day = -1
             elif stop_loss_pct is not None and price <= current_position_entry_price * (1 - stop_loss_pct):
-                actual_signal_for_day = -1  # Force sell for Stop Loss
-                print(f"{data.index[i].strftime('%Y-%m-%d')}: Stop Loss triggered at {price:.2f}")
+                actual_signal_for_day = -1
 
-        # Override the 'Signal' column for this day if SL/TP triggered a sell
-        # This ensures analysis.py correctly identifies SL/TP sell points
         if actual_signal_for_day == -1 and original_signal != -1:
-            data.loc[data.index[i], 'Signal'] = -1  # Update DataFrame for analysis
+            data.loc[data.index[i], 'Signal'] = -1
 
-        # --- 定投策略有特殊的交易逻辑 ---
-        if strategy_name == 'fixed_frequency' and actual_signal_for_day == 1:
-            # For fixed_frequency, 'Signal' being 1 means it's an investment day.
-            # SL/TP should ideally not interfere with a buy signal of fixed_frequency,
-            # as it's a regular investment. SL/TP applies to *existing* holdings.
-            # So, if actual_signal_for_day was forced to -1 by SL/TP, that sell happens first.
-            # If not, and original_signal was 1 (buy day), proceed with buy.
-            if original_signal == 1:  # ensure it was a buy day from strategy
-                amount_to_invest = data['InvestmentAmount'].iloc[i]
-                if cash >= amount_to_invest and amount_to_invest > 0:
-                    commission = _calculate_commission(amount_to_invest, commission_config)
-                    if amount_to_invest > commission:
-                        shares_to_buy = (amount_to_invest - commission) / price
-                        shares += shares_to_buy
-                        cash -= amount_to_invest
+        current_iter_investment = 0  # Investment made in this iteration
 
-                        # Update entry price for averaging down or new position
-                        if current_position_entry_price is None or shares_to_buy == shares:  # first buy or full reinvest
-                            current_position_entry_price = price
-                        else:  # Averaging
-                            current_position_entry_price = ((
-                                                                        shares - shares_to_buy) * current_position_entry_price + shares_to_buy * price) / shares
-                        # print(f"{data.index[i].strftime('%Y-%m-%d')}: Fixed Freq Buy {shares_to_buy:.2f} at {price:.2f}. Entry: {current_position_entry_price:.2f}")
+        if strategy_name == 'fixed_frequency' and original_signal == 1:
+            amount_to_invest = data['InvestmentAmount'].iloc[i]
+            if amount_to_invest > 0:
+                commission = _calculate_commission(amount_to_invest, commission_config)
+                if amount_to_invest > commission:
+                    shares_to_buy = (amount_to_invest - commission) / price
+                    if shares > 0 and current_position_entry_price is not None:
+                        current_total_value = shares * current_position_entry_price
+                        new_total_value = current_total_value + shares_to_buy * price
+                        total_shares_after_buy = shares + shares_to_buy
+                        current_position_entry_price = new_total_value / total_shares_after_buy if total_shares_after_buy > 0 else price
+                    else:
+                        current_position_entry_price = price
+                    shares += shares_to_buy
+                    cash -= amount_to_invest
+                    current_iter_investment = amount_to_invest
+                    if first_investment_amount_for_benchmark == 0:
+                        first_investment_amount_for_benchmark = amount_to_invest
 
-
-        # --- 信号驱动策略的交易逻辑 (Non-fixed_frequency) ---
         elif strategy_name != 'fixed_frequency':
-            # 当信号从非正数变为1时 (BUY from strategy, and not SL/TP sell)
-            if actual_signal_for_day == 1 and last_signal <= 0:
-                if cash > 0:  # Only buy if we have cash
-                    # Sell existing shares if any (e.g., if strategy flipped from short to long, though not supported yet)
-                    if shares > 0:  # This case should ideally not happen if last_signal <=0
-                        trade_value_sell = shares * price
-                        commission_sell = _calculate_commission(trade_value_sell, commission_config)
-                        cash += trade_value_sell - commission_sell
-                        shares = 0
-                        current_position_entry_price = None
+            if actual_signal_for_day == 1 and last_signal <= 0:  # Buy
+                hypothetical_buy_amount = strategy_params.get('amount',
+                                                              1000)  # Default if not specified for signal strategies
+                if strategy_name == 'buy_and_hold':  # Special for B&H
+                    # If ref > 0, B&H invests ref. If ref=0, B&H invests a default (e.g. first定投额 or this hypo)
+                    hypothetical_buy_amount = initial_capital_ref if initial_capital_ref > 0 else strategy_params.get(
+                        'amount', 1000)
 
-                    commission_buy = _calculate_commission(cash, commission_config)  # All in
-                    if cash > commission_buy:
-                        shares_to_buy = (cash - commission_buy) / price
-                        shares += shares_to_buy
-                        cash = 0
-                        current_position_entry_price = price  # New position entry price
-                        # print(f"{data.index[i].strftime('%Y-%m-%d')}: Signal Buy {shares_to_buy:.2f} at {price:.2f}. Entry: {current_position_entry_price:.2f}")
+                commission = _calculate_commission(hypothetical_buy_amount, commission_config)
+                if hypothetical_buy_amount > commission:
+                    shares_to_buy = (hypothetical_buy_amount - commission) / price
+                    if shares > 0 and current_position_entry_price is not None:
+                        current_total_value = shares * current_position_entry_price
+                        new_total_value = current_total_value + shares_to_buy * price
+                        total_shares_after_buy = shares + shares_to_buy
+                        current_position_entry_price = new_total_value / total_shares_after_buy if total_shares_after_buy > 0 else price
+                    else:
+                        current_position_entry_price = price
+                    shares += shares_to_buy
+                    cash -= hypothetical_buy_amount
+                    current_iter_investment = hypothetical_buy_amount
+                    if first_investment_amount_for_benchmark == 0:
+                        first_investment_amount_for_benchmark = hypothetical_buy_amount
 
-            # 当信号从非负数变为-1时 (SELL from strategy OR SL/TP)
-            elif actual_signal_for_day == -1 and (last_signal >= 0 or (
-                    original_signal != -1 and actual_signal_for_day == -1)):  # (last_signal from strategy >=0 OR SL/TP override)
-                if shares > 0:
-                    trade_value = shares * price
-                    commission = _calculate_commission(trade_value, commission_config)
-                    cash += trade_value - commission
-                    shares = 0
-                    current_position_entry_price = None  # Position closed
-                    # print(f"{data.index[i].strftime('%Y-%m-%d')}: Signal/SLTP Sell at {price:.2f}")
+            elif actual_signal_for_day == -1 and shares > 0:  # Sell
+                trade_value = shares * price
+                commission = _calculate_commission(trade_value, commission_config)
+                cash += trade_value - commission
+                shares = 0
+                current_position_entry_price = None
 
-        last_signal = original_signal  # Track strategy's signal for next iteration's comparison
+        data.loc[data.index[i], 'cash_flow'] = cash
+        data.loc[data.index[i], 'shares_held'] = shares
+
+        # Track cumulative actual investment (sum of positive outflows)
+        # This is a bit simplified, actual_invested_capital is more like -cash if cash is always <=0
+        # For PnL % when initial_capital_ref is 0, we need total capital deployed.
+        # Let's use -min(0, cash) which is total outflow.
+        # A better way is to sum all 'amount_to_invest' or 'hypothetical_buy_amount'
+        if i == 0:
+            actual_invested_capital_history.append(current_iter_investment)
+        else:
+            actual_invested_capital_history.append(actual_invested_capital_history[-1] + current_iter_investment)
+
+        last_signal = original_signal
         portfolio_values.append(cash + shares * price)
 
     data['Portfolio_Value'] = portfolio_values
+    data['Cumulative_Investment'] = actual_invested_capital_history[1:]  # Store for analysis
 
-    # --- 5. 计算基准 ---
-    data['Benchmark_Value'] = (data['Close'] / data['Close'].iloc[0]) * initial_capital if initial_capital > 0 else 0
+    # --- Asset Benchmark (Buy & Hold of the asset itself) ---
+    if not data.empty and data['Close'].iloc[0] != 0:
+        asset_first_price = data['Close'].iloc[0]
+        if initial_capital_ref > 0:
+            data['Asset_Benchmark_Value'] = (data['Close'] / asset_first_price) * initial_capital_ref
+        elif first_investment_amount_for_benchmark > 0:  # If ref=0, scale by first strategy investment
+            # Value = (current_price / first_price) * first_investment_amount - first_investment_amount
+            # This makes it comparable to portfolio_value which is PnL from 0
+            # Asset B&H value = (shares_bought_with_first_investment * current_price) - first_investment_amount
+            shares_equiv_asset_benchmark = first_investment_amount_for_benchmark / asset_first_price
+            data['Asset_Benchmark_Value'] = (shares_equiv_asset_benchmark * data[
+                'Close']) - first_investment_amount_for_benchmark
+        else:  # No investment made by strategy, B&H also 0 PnL
+            data['Asset_Benchmark_Value'] = 0.0
+    else:
+        data['Asset_Benchmark_Value'] = 0.0
 
-    if benchmark_ticker:
-        try:
-            # benchmark_data_df already fetched
-            data = data.join(benchmark_data_df.rename(columns={'Close': 'Benchmark_Index'}), how='left').ffill()
-            data['Benchmark_Index_Value'] = (data['Benchmark_Index'] / data['Benchmark_Index'].iloc[
-                0]) * initial_capital if initial_capital > 0 else 0
-        except ValueError as e:
-            print(f"Warning: Could not process benchmark {benchmark_ticker}. Error: {e}")
+    # --- Market Benchmark (e.g., S&P 500) ---
+    if benchmark_ticker and benchmark_data_df is not None and not benchmark_data_df.empty:
+        benchmark_data_df = benchmark_data_df.rename(columns={'Close': 'Market_Benchmark_Price'})
+        # Ensure 'Market_Benchmark_Price' is present after join, otherwise create it with NaN
+        if 'Market_Benchmark_Price' not in data.columns:
+            data = data.join(benchmark_data_df['Market_Benchmark_Price'],
+                             how='left')  # .ffill().bfill() # ffill then bfill
+        else:  # if it was already there (e.g. from a previous failed attempt to join)
+            data['Market_Benchmark_Price'] = data['Market_Benchmark_Price'].fillna(
+                benchmark_data_df['Market_Benchmark_Price'])
 
-    # --- 6. 性能分析 ---
-    results = analyze_performance(data, initial_capital, config)  # Pass full config for names
+        data['Market_Benchmark_Price'] = data['Market_Benchmark_Price'].ffill().bfill()  # Fill NaNs after join
 
-    # (Extra benchmark curve already handled in analyze_performance if data is there)
+        if 'Market_Benchmark_Price' in data.columns and not data['Market_Benchmark_Price'].empty and not pd.isna(
+                data['Market_Benchmark_Price'].iloc[0]) and data['Market_Benchmark_Price'].iloc[0] != 0:
+            market_first_price = data['Market_Benchmark_Price'].iloc[0]
+            if initial_capital_ref > 0:
+                data['Market_Benchmark_Value'] = (data[
+                                                      'Market_Benchmark_Price'] / market_first_price) * initial_capital_ref
+            elif first_investment_amount_for_benchmark > 0:  # If ref=0, scale by first strategy investment
+                shares_equiv_market_benchmark = first_investment_amount_for_benchmark / market_first_price
+                data['Market_Benchmark_Value'] = (shares_equiv_market_benchmark * data[
+                    'Market_Benchmark_Price']) - first_investment_amount_for_benchmark
+            else:  # No investment made by strategy, so market benchmark also 0 PnL
+                data['Market_Benchmark_Value'] = 0.0
+        else:
+            data['Market_Benchmark_Value'] = 0.0  # Default to 0 if market price is NaN or 0
+    else:
+        data['Market_Benchmark_Value'] = 0.0
+
+    config['first_investment_amount'] = first_investment_amount_for_benchmark  # Pass to analysis
+
+    results = analyze_performance(data, initial_capital_ref, config)
     return results
 
 

@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能ETF/股票回测平台</title>
+    <title>智能ETF/股票回测平台 V2.1</title> <!-- Version bump -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; }
-        .container { max-width: 1200px; }
+        .container { max-width: 1200px; } /* Wider for dual y-axis */
         .card { border: none; border-radius: 0.75rem; box-shadow: 0 4px 6px rgba(0,0,0,0.08); }
-        .metric-value { font-size: 2.25rem; font-weight: 600; }
-        .metric-label { color: #6c757d; font-size: 0.9rem; text-transform: uppercase; }
+        .metric-value { font-size: 2.0rem; font-weight: 600; } /* Slightly smaller for more KPIs */
+        .metric-label { color: #6c757d; font-size: 0.85rem; text-transform: uppercase; }
         .form-label { font-weight: 500; }
-        .chart-container { width: 100%; height: 500px; }
+        .chart-container { width: 100%; height: 550px; } /* Taller for dual y-axis */
         .param-group { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #eee; }
         .param-group-title { font-weight: bold; margin-bottom: 0.5rem; color: #343a40; }
     </style>
@@ -20,7 +20,7 @@
 <body>
     <div class="container my-5">
         <header class="text-center mb-5">
-            <h1 class="display-5 fw-bold">智能ETF/股票回测平台 V2</h1>
+            <h1 class="display-5 fw-bold">智能ETF/股票回测平台 V2.1</h1>
             <p class="lead text-muted">量化您的投资想法，用数据驱动决策</p>
         </header>
 
@@ -34,8 +34,9 @@
                         <input type="text" id="tickerInput" class="form-control" placeholder="例: 510300, 600519">
                     </div>
                      <div class="col-md-3">
-                        <label for="initialCapitalInput" class="form-label">初始资金</label>
-                        <input type="number" id="initialCapitalInput" class="form-control" value="100000" placeholder="例: 100000">
+                        <label for="initialCapitalInput" class="form-label">回报计算基准资金</label> <!-- Changed Label -->
+                        <input type="number" id="initialCapitalInput" class="form-control" value="0" placeholder="例: 100000 (0则基于投入计算回报)">
+                        <small class="form-text text-muted">用于计算回报率的参考基数。实际回测从0现金开始。</small>
                     </div>
                     <div class="col-md-3">
                         <label for="periodSelect" class="form-label">回测周期</label>
@@ -67,8 +68,7 @@
                         </select>
                     </div>
                  </div>
-
-
+                <!-- Other form groups (Strategy, SL/TP, Commission) remain the same as previous version -->
                 <hr class="my-4">
                 <!-- 交易策略 -->
                 <div class="param-group">
@@ -93,18 +93,17 @@
                     <div class="row g-3 mb-3 align-items-end">
                         <div class="col-md-3">
                             <label for="takeProfitInput" class="form-label">止盈率 (%)</label>
-                            <input type="number" id="takeProfitInput" class="form-control" placeholder="例: 20 (留空则不止盈)">
+                            <input type="number" id="takeProfitInput" class="form-control" placeholder="例: 20">
                         </div>
                         <div class="col-md-3">
                             <label for="stopLossInput" class="form-label">止损率 (%)</label>
-                            <input type="number" id="stopLossInput" class="form-control" placeholder="例: 10 (留空则不止损)">
+                            <input type="number" id="stopLossInput" class="form-control" placeholder="例: 10">
                         </div>
                          <div class="col-md-6 pt-4">
-                            <small class="text-muted">止盈/止损基于单次买入成本计算。对定投策略，将基于平均持仓成本。</small>
+                            <small class="text-muted">基于平均持仓成本计算。</small>
                         </div>
                     </div>
                 </div>
-
 
                 <!-- 交易成本 -->
                 <div class="param-group">
@@ -122,13 +121,13 @@
                     </div>
                 </div>
 
-
                 <div class="d-grid mt-4">
                     <button id="runButton" class="btn btn-primary btn-lg">开始回测</button>
                 </div>
             </div>
         </div>
 
+        <!-- Loading, Error, Results divs remain the same -->
         <div id="loading" class="text-center my-5" style="display: none;">
             <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
             <p class="mt-2 text-muted">正在进行深度计算，请稍候...</p>
@@ -138,7 +137,7 @@
         </div>
 
         <div id="results" style="display: none;">
-            <h2 id="chartTitle" class="text-center mb-4">回测结果分析</h2> <!-- Title will be dynamic -->
+            <h2 id="chartTitle" class="text-center mb-4">回测结果分析</h2>
             <div class="card p-3 mb-5">
                 <div class="card-body">
                     <h5 class="card-title mb-4">关键性能指标 (KPIs)</h5>
